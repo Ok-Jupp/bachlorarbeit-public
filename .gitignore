@@ -1,0 +1,112 @@
+# ─────────────────────────────
+# IDEs & System Files
+# ─────────────────────────────
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+
+# ─────────────────────────────
+# Cache / Modelle / Checkpoints
+# ─────────────────────────────
+whisper-cache/
+models/
+*.pt
+*.onnx
+*.bin
+*.safetensors
+
+# ─────────────────────────────
+# Datenbank / temporäre Dateien
+# ─────────────────────────────
+*.db
+*.sqlite
+logs/
+temp/
+tmp/
+*.tmp
+
+# ─────────────────────────────
+# Transkripte / KI-Zwischenausgaben
+# ─────────────────────────────
+/data/transkripte/
+/transcripts/
+/outputs/
+/results/
+*_segments.json
+*_timed.txt
+*_suspect_lines.txt
+
+# ─────────────────────────────
+# Video / Audio Outputs
+# ─────────────────────────────
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.webm
+*.mp3
+
+# ─────────────────────────────
+# Generierte Teil-/Ergebnis-Ordner
+# ─────────────────────────────
+/raw_clips/
+/face_combined/
+/face_crop_centers/
+/cropped/
+/subtitled/
+/segments/
+/highlight_clips/
+/output/
+/renders/
+/exports/
+
+# ─────────────────────────────
+# Eingebettete Repos oder externe Module
+# ─────────────────────────────
+/whisper.cpp/
+/text-clustering/
+/venv/
+/.env/
+/.env.local
+.envrc
+.env.*
+
+# ─────────────────────────────
+# Backups / Sonstiges
+# ─────────────────────────────
+*.bak
+*.old
+*.orig
+*.swp
+*.zip
+*.tar
+*.gz
+
+# IDE/System
+.idea/
+.DS_Store
+__pycache__/
+*.pyc
+
+# Secrets/Umgebung
+.env
+config.py
+
+# Große/ausgeleitete Daten
+data/
+transkripte/
+whisper-cache/
+models/
+*.db
+*.mp4 *.mov *.mkv *.wav *.mp3 *.webm
+logs/ tmp/ temp/
+# embedded / external
+text-clustering/
+whisper.cpp/
+
+# embedded / external
+text-clustering/
+whisper.cpp/
