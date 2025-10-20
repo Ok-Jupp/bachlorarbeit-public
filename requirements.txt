@@ -1,0 +1,15 @@
+# Kern-Abhängigkeiten
+openai-whisper
+torch
+ffmpeg-python
+ultralytics
+opencv-python
+mediapipe
+moviepy
+tqdm
+numpy
+regex
+
+# Optionale Pakete (je nach genutztem Codepfad)
+pydub
+scikit-image
