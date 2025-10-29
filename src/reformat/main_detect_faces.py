@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Face-Detection + Mouth-Openness (YOLOv8-face + MediaPipe)
+Face-Detection + Mouth-Openness (YOLOv8-face + MediaPipe) + IoU-Tracking
 - liest Rohclips aus RAW_CLIPS_DIR
 - schreibt pro Video eine faces.json in FACE_COMBINED_DIR
-- optionaler Fortschrittsbalken (tqdm)
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ import time
 from pathlib import Path
 from contextlib import nullcontext
 from typing import List, Dict, Any
-from src.reformat.speaking import get_mouth_openness
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -23,6 +22,18 @@ import torch
 from ultralytics import YOLO
 import mediapipe as mp
 import sys
+
+from src.reformat.speaking import get_mouth_openness
+
+# ── Tracking-Parameter
+IOU_THRESH = 0.35        # Mindest-IoU für "gleiche Person"
+MAX_AGE_S  = 0.60        # ID bleibt so lange erhalten (Sekunden), wenn eine Person kurz fehlt
+
+@dataclass
+class Track:
+    tid: int
+    bbox_xywh: tuple[float, float, float, float]  # (x,y,w,h)
+    last_seen: int                                 # frame index
 
 # ── Projekt-Root + zentrale Pfade laden
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +52,24 @@ torch.set_float32_matmul_precision("high")
 cv2.setUseOptimized(True)
 
 # ---------- Hilfsfunktionen ----------
+def _iou_xywh(a, b):
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    a_x2, a_y2 = ax + aw, ay + ah
+    b_x2, b_y2 = bx + bw, by + bh
+    inter_x1 = max(ax, bx)
+    inter_y1 = max(ay, by)
+    inter_x2 = min(a_x2, b_x2)
+    inter_y2 = min(a_y2, b_y2)
+    iw = max(0.0, inter_x2 - inter_x1)
+    ih = max(0.0, inter_y2 - inter_y1)
+    inter = iw * ih
+    if inter == 0:
+        return 0.0
+    area_a = aw * ah
+    area_b = bw * bh
+    return inter / (area_a + area_b - inter + 1e-9)
+
 def make_square_crop(x1, y1, x2, y2, W, H, margin_scale, min_crop):
     cx = (x1 + x2) * 0.5
     cy = (y1 + y2) * 0.5
@@ -61,7 +90,6 @@ def make_square_crop(x1, y1, x2, y2, W, H, margin_scale, min_crop):
     sy2 = sy1 + side
     return sx1, sy1, sx2, sy2
 
-
 def pick_landmarks_near_crop_center(lm_lists, crop_w, crop_h):
     if not lm_lists:
         return None
@@ -76,7 +104,6 @@ def pick_landmarks_near_crop_center(lm_lists, crop_w, crop_h):
         if d < best_d:
             best, best_d = lms, d
     return best
-
 
 def run_mesh(face_mesh, crop_bgr, upscale_if_small):
     if crop_bgr.size == 0:
@@ -120,6 +147,10 @@ def process_video(video_path: Path,
         return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    max_age_frames = int(round(MAX_AGE_S * fps))
+    tracks: list[Track] = []
+    next_tid = 0
+
     orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames_raw = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -160,12 +191,12 @@ def process_video(video_path: Path,
 
         with torch.no_grad():
             with autocast_ctx:
-                # Ultralytics 8 API: __call__ statt .predict() (beide funktionieren)
                 result = model(frame_infer, imgsz=imgsz, device=device, verbose=False,
                                conf=conf_thresh, iou=0.5, max_det=max_det)
                 detections = result[0]
 
-        faces = []
+        # ---- Gesichter + Mundaktivität sammeln (ohne track_id)
+        faces: List[Dict[str, Any]] = []
         for i in range(len(detections.boxes)):
             box = detections.boxes[i]
             conf = float(box.conf[0]) if hasattr(box.conf, "__len__") else float(box.conf)
@@ -184,7 +215,7 @@ def process_video(video_path: Path,
             cx = x1 + w / 2.0
             cy = y1 + h / 2.0
 
-            # Pass 1
+            # Mouth openness via FaceMesh
             sx1, sy1, sx2, sy2 = make_square_crop(x1, y1, x2, y2, orig_w, orig_h, expansion_1, min_crop)
             if sx2 - sx1 < 4 or sy2 - sy1 < 4:
                 continue
@@ -202,9 +233,54 @@ def process_video(video_path: Path,
                 "bbox": [int(round(x1)), int(round(y1)), int(round(w)), int(round(h))],
                 "conf": round(conf, 3),
                 "center": [round(cx, 1), round(cy, 1)],
-                "mouth_openness": round(float(mouth_open), 3)
+                "mouth_openness": round(float(mouth_open), 3),
+                "mouth_prob": round(float(mouth_open), 3)  # Alias für Downstream
+                # "track_id" vergeben wir gleich nach dem Loop
             })
 
+        # ---- IoU-Tracking: EINMAL pro Frame, nach dem Box-Loop
+        dets = [(i, (float(f["bbox"][0]), float(f["bbox"][1]),
+                     float(f["bbox"][2]), float(f["bbox"][3]))) for i, f in enumerate(faces)]
+
+        assigned = set()
+        used_tracks = set()
+
+        # Greedy Matching: bestes IoU paaren
+        while True:
+            best = None
+            best_iou = 0.0
+            for ti, tr in enumerate(tracks):
+                if ti in used_tracks:
+                    continue
+                for idx, bb in dets:
+                    if idx in assigned:
+                        continue
+                    iou = _iou_xywh(tr.bbox_xywh, bb)
+                    if iou > best_iou:
+                        best_iou = iou
+                        best = (ti, idx, bb)
+            if not best or best_iou < IOU_THRESH:
+                break
+
+            ti, idx, bb = best
+            tracks[ti].bbox_xywh = bb
+            tracks[ti].last_seen = frame_idx
+            faces[idx]["track_id"] = tracks[ti].tid
+            assigned.add(idx)
+            used_tracks.add(ti)
+
+        # Ungepaarte Dets -> neue Tracks
+        for idx, bb in dets:
+            if idx in assigned:
+                continue
+            tracks.append(Track(tid=next_tid, bbox_xywh=bb, last_seen=frame_idx))
+            faces[idx]["track_id"] = next_tid
+            next_tid += 1
+
+        # Alte Tracks entfernen (zu lange nicht gesehen)
+        tracks = [tr for tr in tracks if (frame_idx - tr.last_seen) <= max_age_frames]
+
+        # ---- Frame ins JSON
         data.append({
             "frame": frame_idx,
             "timestamp": round(frame_idx / fps, 3),
@@ -235,7 +311,7 @@ def process_video(video_path: Path,
     if bar is not None:
         bar.close()
 
-    # schön formatiertes JSON
+    # Output schreiben
     output_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"✅ Faces gespeichert: {output_path.name}")
 

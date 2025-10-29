@@ -29,7 +29,7 @@ cursor = conn.cursor()
 # === Unbewertete Highlights laden
 cursor.execute("""
     SELECT id, start, end, text FROM highlights
-    WHERE viralitaet IS NULL OR emotionalitaet IS NULL
+    WHERE viralitaet IS NULL OR emotionalitaet IS NULL OR witz IS NULL OR provokation IS NULL
     ORDER BY start
 """)
 segments = cursor.fetchall()

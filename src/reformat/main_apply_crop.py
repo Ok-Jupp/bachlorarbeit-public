@@ -21,7 +21,7 @@ DEBUG_SCALE_DEFAULT          = 0.6
 MEDIAN_WIN_DEFAULT           = 5
 EMA_ALPHA_DEFAULT            = 0.22
 DEADBAND_PX_DEFAULT          = 8.0
-SWITCH_COOLDOWN_FR_DEFAULT   = 12
+SWITCH_COOLDOWN_FR_DEFAULT   = 19
 ZOOM_PAD_FRAC_DEFAULT        = 0.10
 
 USE_CUT_DETECT_DEFAULT       = True
@@ -280,9 +280,9 @@ def main():
             if args.debug:
                 dbg = frame.copy()
                 cv2.rectangle(dbg, (x, y), (x+w, y+h), (0, 0, 255), 2)
-                draw_center(dbg, desired,    (128,128,255), "desired")
-                draw_center(dbg, desired_f,  (255,255,  0), "median")
-                draw_center(dbg, ema_center, (  0,255,255), "ema")
+                #draw_center(dbg, desired,    (128,128,255), "desired")
+                #draw_center(dbg, desired_f,  (255,255,  0), "median")
+                #draw_center(dbg, ema_center, (  0,255,255), "ema")
                 cv2.putText(dbg, f"t={t+1}/{total}", (12, height-14),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20,220,20), 2, cv2.LINE_AA)
                 disp = cv2.resize(dbg, (int(width*args.debug_scale), int(height*args.debug_scale)))
